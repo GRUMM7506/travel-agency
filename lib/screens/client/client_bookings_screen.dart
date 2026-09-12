@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -9,10 +8,11 @@ import '../../models/booking_balance.dart';
 import '../../providers/client_auth_provider.dart';
 import '../../providers/my_bookings_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/checkout_sheet.dart';
 import '../../widgets/status_chip.dart';
 
-/// Личный кабинет клиента: список его бронирований, остаток к оплате,
-/// реквизиты для перевода и кнопка «Я оплатил».
+/// Личный кабинет клиента: список его бронирований, остаток к оплате
+/// и оплата картой (демо-шлюз, см. widgets/checkout_sheet.dart).
 class ClientBookingsScreen extends StatefulWidget {
   const ClientBookingsScreen({super.key});
 
@@ -32,32 +32,21 @@ class _ClientBookingsScreenState extends State<ClientBookingsScreen> {
     });
   }
 
-  Future<void> _confirmPayment(Booking booking) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Сообщить об оплате?'),
-        content: const Text(
-          'Заявка перейдёт в статус «на проверке». Менеджер сверит поступление '
-          'и подтвердит оплату вручную — это обычно занимает до одного рабочего дня.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Я оплатил'),
-          ),
-        ],
-      ),
+  Future<void> _payBooking(Booking booking, BookingBalance balance) async {
+    final result = await showCheckoutSheet(
+      context,
+      booking: booking,
+      amount: balance.remaining,
     );
-    if (confirmed != true || !mounted) return;
+    if (result == null || !mounted) return;
 
-    final error = await context
-        .read<MyBookingsProvider>()
-        .setStatus(booking.bookingId!, BookingStatuses.underReview);
-    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error ?? 'Спасибо! Менеджер проверит поступление.')),
+      SnackBar(
+        content: Text(
+          'Бронирование №${booking.bookingId} оплачено — '
+          '${_moneyFormat.format(result.amount)} \$',
+        ),
+      ),
     );
   }
 
@@ -138,10 +127,9 @@ class _ClientBookingsScreenState extends State<ClientBookingsScreen> {
                       _BookingCard(
                         booking: booking,
                         balance: provider.balanceOf(booking.bookingId ?? -1),
-                        requisites: provider.requisites,
                         dateFormat: _dateFormat,
                         moneyFormat: _moneyFormat,
-                        onPaid: () => _confirmPayment(booking),
+                        onPay: (balance) => _payBooking(booking, balance),
                         onCancel: () => _cancelBooking(booking),
                       ),
                       const SizedBox(height: 14),
@@ -280,37 +268,28 @@ class _ClientBookingsScreenState extends State<ClientBookingsScreen> {
 
 // ===========================================================================
 
-class _BookingCard extends StatefulWidget {
+class _BookingCard extends StatelessWidget {
   const _BookingCard({
     required this.booking,
     required this.balance,
-    required this.requisites,
     required this.dateFormat,
     required this.moneyFormat,
-    required this.onPaid,
+    required this.onPay,
     required this.onCancel,
   });
 
   final Booking booking;
   final BookingBalance? balance;
-  final PaymentRequisites? requisites;
   final DateFormat dateFormat;
   final NumberFormat moneyFormat;
-  final VoidCallback onPaid;
+  final ValueChanged<BookingBalance> onPay;
   final VoidCallback onCancel;
-
-  @override
-  State<_BookingCard> createState() => _BookingCardState();
-}
-
-class _BookingCardState extends State<_BookingCard> {
-  bool _showRequisites = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = ThemeColors.of(context);
-    final booking = widget.booking;
-    final balance = widget.balance;
+    // Локальная копия: по полю класса Dart не выводит non-null внутри ветвей.
+    final balance = this.balance;
     final needsPayment = balance != null && !balance.isPaid && !booking.isCancelled;
 
     return AppCard(
@@ -354,8 +333,8 @@ class _BookingCardState extends State<_BookingCard> {
             children: [
               if (booking.tourStartDate != null)
                 _fact(colors, Icons.calendar_month,
-                    '${widget.dateFormat.format(booking.tourStartDate!)}'
-                    '${booking.tourEndDate != null ? ' — ${widget.dateFormat.format(booking.tourEndDate!)}' : ''}'),
+                    '${dateFormat.format(booking.tourStartDate!)}'
+                    '${booking.tourEndDate != null ? ' — ${dateFormat.format(booking.tourEndDate!)}' : ''}'),
               _fact(colors, Icons.group_outlined, '${booking.peopleCount} чел.'),
               _fact(colors, Icons.confirmation_number_outlined, '№${booking.bookingId}'),
             ],
@@ -366,11 +345,7 @@ class _BookingCardState extends State<_BookingCard> {
           if (balance != null) _buildBalance(colors, balance) else _buildTotalOnly(colors),
           if (needsPayment) ...[
             const SizedBox(height: 14),
-            _buildActions(colors, booking),
-            if (_showRequisites && widget.requisites != null) ...[
-              const SizedBox(height: 12),
-              _buildRequisites(colors, widget.requisites!, booking),
-            ],
+            _buildActions(colors, balance),
           ] else if (balance != null && balance.isPaid && !booking.isCancelled) ...[
             const SizedBox(height: 12),
             Row(
@@ -393,7 +368,7 @@ class _BookingCardState extends State<_BookingCard> {
       children: [
         Text('Сумма', style: TextStyle(color: colors.textSecondary, fontSize: 13)),
         Text(
-          '${widget.moneyFormat.format(widget.booking.totalCost ?? 0)} \$',
+          '${moneyFormat.format(booking.totalCost ?? 0)} \$',
           style: TextStyle(
             color: colors.accentSecondary,
             fontSize: 17,
@@ -410,13 +385,13 @@ class _BookingCardState extends State<_BookingCard> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Оплачено ${widget.moneyFormat.format(balance.paidAmount)} \$ '
-                'из ${widget.moneyFormat.format(balance.totalCost)} \$',
+            Text('Оплачено ${moneyFormat.format(balance.paidAmount)} \$ '
+                'из ${moneyFormat.format(balance.totalCost)} \$',
                 style: TextStyle(color: colors.textSecondary, fontSize: 12.5)),
             Text(
               balance.isPaid
                   ? 'готово'
-                  : 'осталось ${widget.moneyFormat.format(balance.remaining)} \$',
+                  : 'осталось ${moneyFormat.format(balance.remaining)} \$',
               style: TextStyle(
                 color: balance.isPaid ? colors.success : colors.warning,
                 fontSize: 13,
@@ -441,30 +416,14 @@ class _BookingCardState extends State<_BookingCard> {
     );
   }
 
-  Widget _buildActions(ThemeColors colors, Booking booking) {
-    final awaitingReview = booking.status == BookingStatuses.underReview;
+  Widget _buildActions(ThemeColors colors, BookingBalance balance) {
     return Row(
       children: [
         Expanded(
-          child: OutlinedButton.icon(
-            onPressed: () => setState(() => _showRequisites = !_showRequisites),
-            icon: Icon(_showRequisites ? Icons.expand_less : Icons.credit_card, size: 18),
-            label: Text(_showRequisites ? 'Скрыть' : 'Реквизиты'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: colors.textPrimary,
-              side: BorderSide(color: colors.border),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
           child: ElevatedButton.icon(
-            // Повторно жать «Я оплатил» на брони, уже отправленной на проверку,
-            // незачем — статус от этого не изменится.
-            onPressed: awaitingReview ? null : widget.onPaid,
-            icon: Icon(awaitingReview ? Icons.hourglass_top : Icons.done_all, size: 18),
-            label: Text(awaitingReview ? 'На проверке' : 'Я оплатил'),
+            onPressed: () => onPay(balance),
+            icon: const Icon(Icons.credit_card, size: 18),
+            label: Text('Оплатить ${moneyFormat.format(balance.remaining)} \$'),
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 12),
             ),
@@ -473,86 +432,9 @@ class _BookingCardState extends State<_BookingCard> {
         IconButton(
           tooltip: 'Отменить заявку',
           icon: Icon(Icons.close, size: 20, color: colors.textSecondary),
-          onPressed: widget.onCancel,
+          onPressed: onCancel,
         ),
       ],
-    );
-  }
-
-  Widget _buildRequisites(
-      ThemeColors colors, PaymentRequisites requisites, Booking booking) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.surfaceGlassStrong,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Реквизиты для перевода',
-            style: TextStyle(
-              color: colors.textSecondary,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _requisiteRow(colors, 'Получатель', requisites.recipient),
-          _requisiteRow(colors, 'Банк', requisites.bankName),
-          _requisiteRow(colors, 'Карта / счёт', requisites.cardNumber, copyable: true),
-          _requisiteRow(colors, 'Комментарий', 'Бронирование №${booking.bookingId}',
-              copyable: true),
-          const SizedBox(height: 8),
-          Text(
-            requisites.comment,
-            style: TextStyle(color: colors.textSecondary, fontSize: 11.5, height: 1.4),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _requisiteRow(ThemeColors colors, String label, String value,
-      {bool copyable = false}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 110,
-            child: Text(label,
-                style: TextStyle(color: colors.textSecondary, fontSize: 12)),
-          ),
-          Expanded(
-            child: SelectableText(
-              value,
-              style: TextStyle(
-                color: colors.textPrimary,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          if (copyable)
-            InkWell(
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: value));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Скопировано')),
-                );
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Icon(Icons.copy, size: 15, color: colors.accentPrimary),
-              ),
-            ),
-        ],
-      ),
     );
   }
 

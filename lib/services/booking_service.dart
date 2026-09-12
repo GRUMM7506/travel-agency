@@ -77,9 +77,20 @@ class BookingService {
     return Booking.fromJson(response.data);
   }
 
-  Future<PaymentRequisites> getRequisites({bool asCustomer = true}) async {
+  /// Оплата картой через демо-шлюз: списывает весь остаток и переводит бронь
+  /// в «оплачен». На сервер уходят только последние 4 цифры — полный номер
+  /// карты, срок и CVC остаются в форме и никуда не отправляются.
+  Future<CheckoutResult> pay(
+    int bookingId, {
+    required String cardLast4,
+    String? cardholder,
+    bool asCustomer = true,
+  }) async {
     final dio = asCustomer ? _customerDio : _dio;
-    final response = await dio.get('/bookings/requisites');
-    return PaymentRequisites.fromJson(response.data);
+    final response = await dio.post('/bookings/$bookingId/pay', data: {
+      'card_last4': cardLast4,
+      if (cardholder != null && cardholder.isNotEmpty) 'cardholder': cardholder,
+    });
+    return CheckoutResult.fromJson(response.data);
   }
 }

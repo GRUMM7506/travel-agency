@@ -67,12 +67,6 @@ class FakeApi implements HttpClientAdapter {
           'passport': 'A2345678',
           'foreign_passport': 'AB2345678',
         },
-        '/bookings/requisites': {
-          'recipient': 'ООО «Турагентство Мечта»',
-          'card_number': '8600 1234 5678 9012',
-          'bank_name': 'Народный банк',
-          'comment': 'Укажите номер бронирования в комментарии к переводу.',
-        },
         '/reports/dashboard': {
           'tours_count': 60,
           'active_tours_count': 48,

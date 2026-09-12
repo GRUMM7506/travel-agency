@@ -12,15 +12,11 @@ class Settings(BaseSettings):
     #: оформляет сам с витрины (сотрудник в админке может задать свою).
     DEFAULT_COMMISSION_PERCENT: Decimal = Decimal("10")
 
-    #: Реквизиты для перевода. В MVP платёжного шлюза нет: клиент переводит
-    #: сам и жмёт «Я оплатил», сотрудник подтверждает поступление вручную.
-    PAYMENT_RECIPIENT: str = 'ООО «Турагентство Мечта»'
-    PAYMENT_CARD_NUMBER: str = "0000 0000 0000 0000"
-    PAYMENT_BANK_NAME: str = "Укажите банк в .env (PAYMENT_BANK_NAME)"
-    PAYMENT_COMMENT: str = "В комментарии к переводу укажите номер бронирования."
-
     class Config:
         env_file = ".env"
+        # Оплата по реквизитам заменена демо-шлюзом, но PAYMENT_* могли
+        # остаться в чьём-нибудь .env — лишние переменные не должны ронять старт.
+        extra = "ignore"
 
 
 settings = Settings()

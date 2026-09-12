@@ -17,7 +17,7 @@ from app.schemas.booking import (
     BookingUpdate,
     ClientBookingCreate,
 )
-from app.schemas.payment import PaymentRequisites
+from app.schemas.payment import CheckoutRequest, CheckoutResult
 from app.services import booking_service, payment_service
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
@@ -51,7 +51,7 @@ async def create_self_booking(
 
     Клиент не управляет ни скидкой, ни комиссией, ни статусом: скидка 0,
     комиссия — агентская по умолчанию, статус «ожидает оплаты». Дальше
-    сотрудник вручную подтверждает платёж и двигает статус.
+    клиент оплачивает её картой (POST /bookings/{id}/pay).
     """
     booking = await booking_service.build_booking(
         db,
@@ -66,20 +66,6 @@ async def create_self_booking(
         ),
     )
     return await crud.create(db, booking)
-
-
-@router.get("/requisites", response_model=PaymentRequisites)
-async def payment_requisites(_: CurrentActor = Depends(get_current_actor)):
-    """Реквизиты для перевода — клиент платит вручную, сотрудник подтверждает.
-
-    Берутся из настроек (.env), а не хардкодятся в виджете.
-    """
-    return PaymentRequisites(
-        recipient=settings.PAYMENT_RECIPIENT,
-        card_number=settings.PAYMENT_CARD_NUMBER,
-        bank_name=settings.PAYMENT_BANK_NAME,
-        comment=settings.PAYMENT_COMMENT,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -176,14 +162,33 @@ async def update_booking_status(
     actor: CurrentActor = Depends(get_current_actor),
     db: AsyncSession = Depends(get_db),
 ):
-    """Сотрудник ставит любой статус; клиент — только «на проверке» (я оплатил)
-    или «отменён», и только своей брони."""
+    """Сотрудник ставит любой статус; клиент — только «на проверке» или
+    «отменён», и только своей брони.
+
+    Оплату клиент проводит не здесь, а через POST /bookings/{id}/pay —
+    статус «оплачен» выставляет сам шлюз."""
     booking = await _booking_for_actor(db, booking_id, actor)
 
     if not actor.is_staff and data.status not in CLIENT_ALLOWED_STATUSES:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            detail="Клиент может только сообщить об оплате или отменить заявку",
+            detail="Клиент может только отменить заявку",
         )
 
     return await crud.set_status(db, booking, data.status)
+
+
+@router.post("/{booking_id}/pay", response_model=CheckoutResult)
+async def pay_booking(
+    booking_id: int,
+    data: CheckoutRequest,
+    actor: CurrentActor = Depends(get_current_actor),
+    db: AsyncSession = Depends(get_db),
+):
+    """Оплата брони картой через демонстрационный шлюз.
+
+    Доступна владельцу брони и сотруднику. Списывает весь остаток одним
+    платежом и переводит бронь в «оплачен» — см. payment_service.checkout.
+    """
+    booking = await _booking_for_actor(db, booking_id, actor)
+    return await payment_service.checkout(db, booking, data)

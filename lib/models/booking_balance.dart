@@ -30,24 +30,27 @@ class BookingBalance {
       );
 }
 
-/// Реквизиты для перевода — ответ GET /bookings/requisites.
-class PaymentRequisites {
-  final String recipient;
-  final String cardNumber;
-  final String bankName;
-  final String comment;
+/// Ответ демо-шлюза — POST /bookings/{id}/pay.
+class CheckoutResult {
+  final BookingBalance balance;
+  final String bookingStatus;
+  final double amount;
+  final String? paymentMethod;
 
-  const PaymentRequisites({
-    required this.recipient,
-    required this.cardNumber,
-    required this.bankName,
-    required this.comment,
+  const CheckoutResult({
+    required this.balance,
+    required this.bookingStatus,
+    required this.amount,
+    this.paymentMethod,
   });
 
-  factory PaymentRequisites.fromJson(Map<String, dynamic> json) => PaymentRequisites(
-        recipient: json['recipient'] as String,
-        cardNumber: json['card_number'] as String,
-        bankName: json['bank_name'] as String,
-        comment: json['comment'] as String,
-      );
+  factory CheckoutResult.fromJson(Map<String, dynamic> json) {
+    final payment = json['payment'] as Map<String, dynamic>;
+    return CheckoutResult(
+      balance: BookingBalance.fromJson(json['balance'] as Map<String, dynamic>),
+      bookingStatus: json['booking_status'] as String,
+      amount: double.parse(payment['amount'].toString()),
+      paymentMethod: payment['payment_method'] as String?,
+    );
+  }
 }

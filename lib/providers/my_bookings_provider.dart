@@ -14,14 +14,12 @@ class MyBookingsProvider extends ChangeNotifier {
 
   List<Booking> _bookings = [];
   final Map<int, BookingBalance> _balances = {};
-  PaymentRequisites? _requisites;
   bool _isLoading = false;
   String? _error;
 
   List<Booking> get bookings => _bookings;
   bool get isLoading => _isLoading;
   String? get error => _error;
-  PaymentRequisites? get requisites => _requisites;
 
   BookingBalance? balanceOf(int bookingId) => _balances[bookingId];
 
@@ -36,7 +34,6 @@ class MyBookingsProvider extends ChangeNotifier {
     try {
       _bookings = await _service.getMy();
       await _loadBalances();
-      _requisites ??= await _service.getRequisites();
     } catch (e) {
       _error = ApiService.instance.parseError(e);
     } finally {
@@ -74,7 +71,22 @@ class MyBookingsProvider extends ChangeNotifier {
     }
   }
 
-  /// «Я оплатил» / «Отменить заявку» — бэкенд разрешит клиенту только эти два.
+  /// Оплата картой через демо-шлюз. Возвращает результат платежа либо
+  /// пробрасывает текст ошибки — экран показывает то и другое по-разному.
+  Future<CheckoutResult> pay(int bookingId, {
+    required String cardLast4,
+    String? cardholder,
+  }) async {
+    final result = await _service.pay(
+      bookingId,
+      cardLast4: cardLast4,
+      cardholder: cardholder,
+    );
+    await load();
+    return result;
+  }
+
+  /// «Отменить заявку» — единственный статус, который клиенту доступен.
   Future<String?> setStatus(int bookingId, String status) async {
     try {
       await _service.updateStatus(bookingId, status, asCustomer: true);
