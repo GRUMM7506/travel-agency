@@ -1,0 +1,45 @@
+name: Build & deploy Flutter web
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: "Адрес backend API (например https://api.example.com или https://xxxx.trycloudflare.com)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - run: flutter pub get
+
+      # API_BASE_URL берётся из ручного запуска (workflow_dispatch), либо из
+      # репозиторной переменной API_BASE_URL (Settings -> Secrets and variables
+      # -> Actions -> Variables), либо остаётся пустым (тогда используется
+      # адрес по умолчанию из lib/services/api_service.dart).
+      - name: Build web
+        run: |
+          API_URL="${{ github.event.inputs.api_base_url }}"
+          if [ -z "$API_URL" ]; then
+            API_URL="${{ vars.API_BASE_URL }}"
+          fi
+          echo "Using API_BASE_URL=$API_URL"
+          flutter build web --release --base-href /travel-agency/ --dart-define=API_BASE_URL="$API_URL"
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/web
