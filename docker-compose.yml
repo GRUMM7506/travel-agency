@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: travel_agency_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/travel_agency_db
+      DATABASE_URL_SYNC: postgresql://postgres:postgres@db:5432/travel_agency_db
+      SECRET_KEY: change-me-please-a-real-secret
+      CORS_ORIGINS: '["*"]'
+      SEED_DB: "true"
+    ports:
+      - "8000:8000"
+
+  # Бесплатный HTTPS-туннель без домена и без аккаунта — нужен, чтобы сайт на
+  # GitHub Pages (https://) мог достучаться до backend (браузер блокирует
+  # обычный http:// с https-страницы). После `docker compose up` ссылка
+  # появится в логах: `docker compose logs cloudflared | grep trycloudflare`.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --url http://backend:8000 --no-autoupdate
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
