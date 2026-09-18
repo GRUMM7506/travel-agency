@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "com.example.travel_agency_app"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_secure_storage требует compileSdk 37+; flutter.compileSdkVersion
+    // на момент написания даёт 36, поэтому фиксируем версию явно.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
